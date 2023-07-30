@@ -10,7 +10,7 @@ use Telegram\Bot\Objects\Update;
 abstract class Dialog
 {
     protected int $chatId;
-    
+
     protected int $userId;
 
     /** @var array<string, mixed> Key-value storage to store data between steps. */
@@ -209,6 +209,7 @@ abstract class Dialog
     {
         return [
             'chat_id' => $this->getChatId(),
+            'user_id' => $this->getUserId(),
             'next' => $this->next,
             'memory' => $this->memory,
         ];
