@@ -36,7 +36,7 @@ abstract class Dialog
     {
         $message = $update->getMessage();
 
-        $this->chatId = $message->getChat()->id;
+        $this->chatId = $message->chat->id;
         $this->userId = $message->from->id;
 
         if ($bot) {
