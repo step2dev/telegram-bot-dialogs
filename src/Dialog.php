@@ -9,7 +9,9 @@ use Telegram\Bot\Objects\Update;
 
 abstract class Dialog
 {
-    protected int $chat_id;
+    protected int $chatId;
+    
+    protected int $userId;
 
     /** @var array<string, mixed> Key-value storage to store data between steps. */
     protected array $memory = [];
@@ -29,9 +31,11 @@ abstract class Dialog
     /** @var int|null Index of the next step that set manually using jump() method. */
     private ?int $afterProceedJumpToIndex = null;
 
-    public function __construct(int $chatId, Api $bot = null)
+    public function __construct(Update $update, Api $bot = null)
     {
-        $this->chat_id = $chatId;
+        $this->chatId  = $update->getMessage()->getChat()->getId();
+        $this->userId = $update->getMessage()->getFrom()->getId();
+
         if ($bot) {
             $this->bot = $bot;
         }
@@ -150,7 +154,12 @@ abstract class Dialog
     /** Returns Telegram Chat ID */
     final public function getChatId(): int
     {
-        return $this->chat_id;
+        return $this->chatId;
+    }
+
+    final public function getUserId(): int
+    {
+        return $this->userId;
     }
 
     /** Get a number of seconds to store state of the Dialog after latest activity on it. */
@@ -203,5 +212,10 @@ abstract class Dialog
             'next' => $this->next,
             'memory' => $this->memory,
         ];
+    }
+
+    public function getDialogKey()
+    {
+        return $this->getUserId().$this->getChatId();
     }
 }
