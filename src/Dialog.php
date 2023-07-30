@@ -220,6 +220,6 @@ abstract class Dialog
 
     public function getDialogKey()
     {
-        return $this->getUserId().'_'.$this->getChatId();
+        return $this->getUserId().'-'.$this->getChatId();
     }
 }
