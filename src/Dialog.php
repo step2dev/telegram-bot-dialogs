@@ -1,109 +1,225 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace KootLabs\TelegramBotDialogs;
 
-use KootLabs\TelegramBotDialogs\Storages\Store;
+use KootLabs\TelegramBotDialogs\Exceptions\InvalidDialogStep;
+use KootLabs\TelegramBotDialogs\Exceptions\UnexpectedUpdateType;
 use Telegram\Bot\Api;
-use Telegram\Bot\Objects\Message;
 use Telegram\Bot\Objects\Update;
 
-final class DialogManager
+abstract class Dialog
 {
-    /** Bot instance to use for all API calls. */
-    private Api $bot;
+    protected int $chatId;
 
-    /** Storage to store Dialog state between requests. */
-    private Store $store;
+    protected int $userId;
 
-    public function __construct(Api $bot, Store $store)
+    /** @var array<string, mixed> Key-value storage to store data between steps. */
+    protected array $memory = [];
+
+    /** @var \Telegram\Bot\Api Associated Bot instance that will perform API calls. */
+    protected Api $bot;
+
+    /** Seconds to store state of the Dialog after latest activity on it. */
+    protected int $ttl = 300;
+
+    /** @var list<string|array<array-key, string|bool>> List of steps. */
+    protected array $steps = [];
+
+    /** @var int Index of the next step. */
+    protected int $next = 0;
+
+    /** @var int|null Index of the next step that set manually using jump() method. */
+    private ?int $afterProceedJumpToIndex = null;
+
+    public function __construct(Update $update, Api $bot = null)
     {
-        $this->bot = $bot;
-        $this->store = $store;
-    }
-
-    /**
-     * Activate a new Dialog.
-     * to start it - call {@see \KootLabs\TelegramBotDialogs\DialogManager::proceed}
-     */
-    public function activate(Dialog $dialog): void
-    {
-        $this->storeDialogState($dialog);
-    }
-
-    /** Use non-default Bot for API calls */
-    public function setBot(Api $bot): void
-    {
-        $this->bot = $bot;
-    }
-
-    private function getDialogInstance(Update $update): ?Dialog
-    {
-        if (! $this->exists($update)) {
-            return null;
-        }
-
         $message = $update->getMessage();
 
-        $key = $this->generateDialogKey($message);
+        $this->chatId = $message->chat->id;
+        $this->userId = $message->from->id;
 
-        $dialog = $this->readDialogState($key);
-        $dialog->setBot($this->bot);
-
-        return $dialog;
+        if ($bot) {
+            $this->bot = $bot;
+        }
     }
 
     /**
-     * Run next step of the active Dialog.
-     * This is a thin wrapper for {@see \KootLabs\TelegramBotDialogs\Dialog::proceed}
-     * to store and restore Dialog state between request-response calls.
+     * Specify bot instance (for multi-bot applications).
+     * @internal DialogManager is the only user of this method.
      */
-    public function proceed(Update $update): void
+    final public function setBot(Api $bot): void
     {
-        $dialog = $this->getDialogInstance($update);
-        if ($dialog === null) {
+        $this->bot = $bot;
+    }
+
+    /** Start Dialog from the begging. */
+    final public function start(Update $update): void
+    {
+        $this->next = 0;
+        $this->proceed($update);
+    }
+
+    /**
+     * @throws \KootLabs\TelegramBotDialogs\Exceptions\InvalidDialogStep
+     * @throws \Telegram\Bot\Exceptions\TelegramSDKException
+     */
+    final public function proceed(Update $update): void
+    {
+        $currentStepIndex = $this->next;
+
+        if ($this->isEnd()) {
             return;
         }
 
-        $dialog->proceed($update);
+        if (! array_key_exists($currentStepIndex, $this->steps)) {
+            throw new InvalidDialogStep("Undefined step with index $currentStepIndex.");
+        }
+        $stepNameOrConfig = $this->steps[$currentStepIndex];
 
-        if ($dialog->isEnd()) {
-            $this->store->delete($dialog->getDialogKey());
+        if (is_array($stepNameOrConfig)) {
+            $this->proceedConfiguredStep($stepNameOrConfig, $update, $currentStepIndex);
+        } elseif (is_string($stepNameOrConfig)) {
+            $stepMethodName = $stepNameOrConfig;
+
+            if (! method_exists($this, $stepMethodName)) {
+                throw new InvalidDialogStep(sprintf('Public method “%s::%s()” is not available.', $this::class, $stepMethodName));
+            }
+
+            try {
+                $this->beforeEveryStep($update, $currentStepIndex);
+                $this->$stepMethodName($update);
+                $this->afterEveryStep($update, $currentStepIndex);
+            } catch (UnexpectedUpdateType) {
+                return; // skip moving to the next step
+            }
         } else {
-            $this->storeDialogState($dialog);
+            throw new InvalidDialogStep('Unknown format of the step.');
+        }
+
+        // Step forward only if did not change inside the step handler
+        $hasJumpedIntoAnotherStep = $this->afterProceedJumpToIndex !== null;
+        if ($hasJumpedIntoAnotherStep) {
+            $this->next = $this->afterProceedJumpToIndex;
+            $this->afterProceedJumpToIndex = null;
+        } else {
+            ++$this->next;
         }
     }
 
-    /** Whether Dialog exist for a given Update. */
-    public function exists(Update $update): bool
+    /** @experimental Run code before every step. */
+    protected function beforeEveryStep(Update $update, int $step): void
     {
-        $message = $update->getMessage();
-
-        $key = $this->generateDialogKey($message);
-
-        return $key && $this->store->has($key);
+        // override the method to add your logic here
     }
 
-    /** Store all Dialog. */
-    private function storeDialogState(Dialog $dialog): void
+    /** @experimental Run code after every step. */
+    protected function afterEveryStep(Update $update, int $step): void
     {
-        $this->store->set($dialog->getDialogKey(), $dialog, $dialog->ttl());
+        // override the method to add your logic here
     }
 
-    /** Restore Dialog. */
-    private function readDialogState($key): Dialog
+    /** Jump to the particular step of the Dialog. */
+    final protected function jump(string $stepName): void
     {
-        return $this->store->get($key);
+        foreach ($this->steps as $index => $value) {
+            if ($value === $stepName || (is_array($value) && $value['name'] === $stepName)) {
+                $this->afterProceedJumpToIndex = $index;
+                break;
+            }
+        }
     }
 
-    private function generateDialogKey(Message $message)
+    /** Move Dialog’s cursor to the end. */
+    final public function end(): void
     {
-        $userId = $message->from->id;
-        $chatId = $message->chat->id;
+        $this->next = count($this->steps);
+    }
 
-        if (! $userId && $chatId) {
-            return null;
+    /** Remember information for next steps. */
+    final protected function remember(string $key, mixed $value): void
+    {
+        $this->memory[$key] = $value;
+    }
+
+    /** Forget information from next steps. */
+    final protected function forget(string $key): void
+    {
+        unset($this->memory[$key]);
+    }
+
+    /** Check if Dialog ended */
+    final public function isEnd(): bool
+    {
+        return $this->next >= count($this->steps);
+    }
+
+    /** Returns Telegram Chat ID */
+    final public function getChatId(): ?int
+    {
+        return $this->chatId;
+    }
+
+    final public function getUserId(): ?int
+    {
+        return $this->userId;
+    }
+
+    /** Get a number of seconds to store state of the Dialog after latest activity on it. */
+    final public function ttl(): int
+    {
+        return $this->ttl;
+    }
+
+    /**
+     * @throws \Telegram\Bot\Exceptions\TelegramSDKException
+     * @throws \KootLabs\TelegramBotDialogs\Exceptions\InvalidDialogStep
+     */
+    private function proceedConfiguredStep(array $stepConfig, Update $update, int $currentStepIndex): void
+    {
+        if (! isset($stepConfig['name'])) {
+            throw new InvalidDialogStep('Configurable Dialog step does not contain required “name” value.');
         }
 
-        return $userId.'-'.$chatId;
+        $this->beforeEveryStep($update, $currentStepIndex);
+
+        if (isset($stepConfig['response'])) {
+            $params = [
+                'chat_id' => $this->getChatId(),
+                'text'    => $stepConfig['response'],
+            ];
+
+            if (! empty($stepConfig['options'])) {
+                $params = array_merge($params, $stepConfig['options']);
+            }
+
+            $this->bot->sendMessage($params);
+        }
+
+        if (! empty($stepConfig['jump'])) {
+            $this->jump($stepConfig['jump']);
+        }
+
+        $this->afterEveryStep($update, $currentStepIndex);
+
+        if (isset($stepConfig['end']) && $stepConfig['end'] === true) {
+            $this->end();
+        }
+    }
+
+    /** @return array<string, mixed> */
+    public function __serialize(): array
+    {
+        return [
+            'chatId' => $this->getChatId(),
+            'userId' => $this->getUserId(),
+            'next'    => $this->next,
+            'memory'  => $this->memory,
+        ];
+    }
+
+    public function getDialogKey()
+    {
+        return $this->getUserId().'-'.$this->getChatId();
     }
 }
