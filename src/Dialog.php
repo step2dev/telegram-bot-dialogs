@@ -1,4 +1,5 @@
-<?php declare(strict_types=1);
+<?php
+declare(strict_types=1);
 
 namespace KootLabs\TelegramBotDialogs;
 
@@ -33,8 +34,10 @@ abstract class Dialog
 
     public function __construct(Update $update, Api $bot = null)
     {
-        $this->chatId  = $update->getMessage()->getChat()->getId();
-        $this->userId = $update->getMessage()->getFrom()->getId();
+        $message = $update->getMessage();
+
+        $this->chatId = $message->getChat()->getId();
+        $this->userId = $message->from->id;
 
         if ($bot) {
             $this->bot = $bot;
@@ -63,7 +66,7 @@ abstract class Dialog
      */
     final public function proceed(Update $update): void
     {
-         $currentStepIndex = $this->next;
+        $currentStepIndex = $this->next;
 
         if ($this->isEnd()) {
             return;
@@ -157,7 +160,7 @@ abstract class Dialog
         return $this->chatId;
     }
 
-    final public function getUserId(): int
+    final public function getUserId(): ?int
     {
         return $this->userId;
     }
@@ -174,7 +177,7 @@ abstract class Dialog
      */
     private function proceedConfiguredStep(array $stepConfig, Update $update, int $currentStepIndex): void
     {
-        if (!isset($stepConfig['name'])) {
+        if (! isset($stepConfig['name'])) {
             throw new InvalidDialogStep('Configurable Dialog step does not contain required “name” value.');
         }
 
@@ -183,17 +186,17 @@ abstract class Dialog
         if (isset($stepConfig['response'])) {
             $params = [
                 'chat_id' => $this->getChatId(),
-                'text' => $stepConfig['response'],
+                'text'    => $stepConfig['response'],
             ];
 
-            if (!empty($stepConfig['options'])) {
+            if (! empty($stepConfig['options'])) {
                 $params = array_merge($params, $stepConfig['options']);
             }
 
             $this->bot->sendMessage($params);
         }
 
-        if (!empty($stepConfig['jump'])) {
+        if (! empty($stepConfig['jump'])) {
             $this->jump($stepConfig['jump']);
         }
 
@@ -210,8 +213,8 @@ abstract class Dialog
         return [
             'chat_id' => $this->getChatId(),
             'user_id' => $this->getUserId(),
-            'next' => $this->next,
-            'memory' => $this->memory,
+            'next'    => $this->next,
+            'memory'  => $this->memory,
         ];
     }
 
