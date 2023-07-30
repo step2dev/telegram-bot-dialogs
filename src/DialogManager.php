@@ -43,8 +43,8 @@ final class DialogManager
         }
 
         $message = $update->getMessage();
-        
-        $key = $this->generateDialogKey($message)
+
+        $key = $this->generateDialogKey($message);
 
         $dialog = $this->readDialogState($key);
         $dialog->setBot($this->bot);
@@ -77,9 +77,9 @@ final class DialogManager
     public function exists(Update $update): bool
     {
         $message = $update->getMessage();
-        
-        $key = $this->generateDialogKey($message)
-            
+
+        $key = $this->generateDialogKey($message);
+
         return $key && $this->store->has($key);
     }
 
@@ -96,14 +96,14 @@ final class DialogManager
     }
 
     private function generateDialogKey(Message $message)
-    {  
+    {
         $userId = $message->from->id;
         $chatId = $message->chat->id;
 
         if (! $userId && $chatId) {
             return null;
         }
-        
+
         return $userId.'-'.$chatId;
     }
 }
