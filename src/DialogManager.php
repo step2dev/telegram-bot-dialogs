@@ -43,10 +43,10 @@ final class DialogManager
         }
 
         $message = $update->getMessage();
-        assert($message instanceof \Telegram\Bot\Objects\Message);
-        $chatId = $message->chat->id;
+        
+        $key = $this->generateDialogKey($message)
 
-        $dialog = $this->readDialogState($chatId);
+        $dialog = $this->readDialogState($key);
         $dialog->setBot($this->bot);
 
         return $dialog;
@@ -67,7 +67,7 @@ final class DialogManager
         $dialog->proceed($update);
 
         if ($dialog->isEnd()) {
-            $this->store->delete($dialog->getChatId());
+            $this->store->delete($dialog->getDialogKey());
         } else {
             $this->storeDialogState($dialog);
         }
@@ -77,19 +77,33 @@ final class DialogManager
     public function exists(Update $update): bool
     {
         $message = $update->getMessage();
-        $chatId = $message instanceof Message ? $message->chat->id : null;
-        return $chatId && $this->store->has($chatId);
+        
+        $key = $this->generateDialogKey($message)
+            
+        return $key && $this->store->has($key);
     }
 
     /** Store all Dialog. */
     private function storeDialogState(Dialog $dialog): void
     {
-        $this->store->set($dialog->getChatId(), $dialog, $dialog->ttl());
+        $this->store->set($dialog->getDialogKey(), $dialog, $dialog->ttl());
     }
 
     /** Restore Dialog. */
-    private function readDialogState(int $chatId): Dialog
+    private function readDialogState($key): Dialog
     {
-        return $this->store->get($chatId);
+        return $this->store->get($key);
+    }
+
+    private function generateDialogKey(Message $message)
+    {  
+        $userId = $message->from->id;
+        $chatId = $message->chat->id;
+
+        if (! $userId && $chatId) {
+            return null;
+        }
+        
+        return $userId.'-'.$chatId;
     }
 }
