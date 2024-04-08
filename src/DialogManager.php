@@ -6,6 +6,7 @@ use KootLabs\TelegramBotDialogs\Storages\Store;
 use Telegram\Bot\Api;
 use Telegram\Bot\Objects\Message;
 use Telegram\Bot\Objects\Update;
+use Illuminate\Support\Collection;
 
 final class DialogManager
 {
@@ -95,10 +96,10 @@ final class DialogManager
         return $this->store->get($key);
     }
 
-    private function generateDialogKey(Message $message)
+    private function generateDialogKey(Message|Collection $message)
     {
-        $userId = $message->from->id;
-        $chatId = $message->chat->id;
+        $userId = $message->get('from.id',$message->get('user.id') ;
+        $chatId = $message->get('chat.id', $message->get('user_chat_id'));
 
         if (! $userId && $chatId) {
             return null;
