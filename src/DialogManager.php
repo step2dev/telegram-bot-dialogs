@@ -98,7 +98,7 @@ final class DialogManager
 
     private function generateDialogKey(Message|Collection $message)
     {
-        $userId = $message->get('from.id',$message->get('user.id') ;
+        $userId = $message->get('from.id', $message->get('user.id'));
         $chatId = $message->get('chat.id', $message->get('user_chat_id'));
 
         if (! $userId && $chatId) {
